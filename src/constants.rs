@@ -183,3 +183,15 @@ pub mod typesize {
     /// delta increment
     pub const SZ_DELTA: u8 = 7;
 }
+
+pub mod selector {
+    pub const TM_ANGLE: u8 = 0;
+    pub const TM_PAREN: u8 = 1;
+    pub const TM_ROOT: u8 = 10;
+}
+
+pub mod selector_ocupy {
+    pub const FIRST: &str = "#M_1";
+    pub const SECOND: &str = "#M_2";
+    pub const THIRD: &str = "#M_3";
+}

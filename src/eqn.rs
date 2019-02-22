@@ -5,7 +5,12 @@ use std::io::BufRead;
 use encoding::{Encoding, DecoderTrap};
 use encoding::all::{GBK, UTF_8};
 use std::borrow::Cow;
+use crate::constants::{selector, selector_ocupy};
 
+#[derive(Debug)]
+struct Latex {
+    latex_str: String
+}
 
 #[derive(Debug)]
 pub struct MTEquation {
@@ -23,7 +28,7 @@ pub struct MTEquation {
 
 #[derive(Debug)]
 enum MTRecords {
-    END,
+    END(MTEnd),
     LINE(MTLine),
     CHAR(MTChar),
     TMPL(MTTmpl),
@@ -31,10 +36,18 @@ enum MTRecords {
     FONT_DEF { enc_def_index: u8, name: String },
     FONT_STYLE_DEF { font_def_index: u8, char_style: u8 },
     EQN_PREFS { sizes: Vec<String>, spaces: Vec<String>, styles: Vec<Option<u8>> },
-    FULL, SUB, SUB2, SYM, SUBSYM,
+    FULL,
+    SUB,
+    SUB2,
+    SYM,
+    SUBSYM,
     FUTURE,
 }
 
+#[derive(Debug)]
+struct MTEnd {
+    end: bool, // 是否结束
+}
 
 #[derive(Debug)]
 struct MTLine {
@@ -48,8 +61,9 @@ struct MTTmpl {
     nudge: (u16, u16),
     selector: u8,
     variation: u16,
-    options: u8
+    options: u8,
 }
+
 
 #[derive(Debug)]
 struct MTChar {
@@ -59,6 +73,79 @@ struct MTChar {
     fp8: Option<u8>,
     fp16: Option<u16>,
 }
+
+impl MTLine {
+    fn to_latex(&self, stack: &mut Vec<String>) {
+        if self.null == false {
+            // 推入line标识符
+            stack.push("line".to_string());
+        }
+    }
+}
+
+impl MTTmpl {
+    fn to_latex(&self, stack: &mut Vec<String>) {
+        let tmpl_str = match self.selector {
+            selector::TM_ANGLE => { "".to_string() }
+            selector::TM_PAREN => { "".to_string() }
+            selector::TM_ROOT => {
+                let root_str = format!(
+                    "\\sqrt [ {second} ] {{ {first} }}",
+                    first = selector_ocupy::FIRST,
+                    second = selector_ocupy::SECOND
+                );
+
+                // 返回数据
+                root_str
+            }
+            _ => { "".to_string() }
+        };
+
+        stack.push(tmpl_str);
+    }
+}
+
+impl MTChar {
+    fn to_latex(&self, latex: &mut Latex) {
+        if let Some(mtcode) = self.mtcode {
+            let s = String::from_utf16_lossy(&[mtcode]);
+            latex.latex_str.push_str(&s);
+        }
+    }
+}
+
+impl MTEnd {
+    fn to_latex(&self, latex: &mut Latex, stack: &mut Vec<String>, stack_char: &mut Vec<String>) {
+        if self.end == true {
+            let pre_stack = stack.pop();
+            let occupy = vec![selector_ocupy::FIRST, selector_ocupy::SECOND];
+
+            match pre_stack {
+                None => {
+                    println!("------ None ------");
+                }
+                Some(mut tmpl) => {
+                    if tmpl == "line".to_string() {
+                        let l_str = latex.latex_str.clone();
+                        stack_char.push(l_str);
+
+                        // 重置latex字符串列表，开始新一个line的字符数据
+                        latex.latex_str = "".to_string();
+                    } else {
+                        // 公式开始
+                        let mut i = 0;
+                        while i < stack_char.len() {
+                            tmpl = tmpl.replace(occupy[i], &stack_char[i]);
+                            i += 1;
+                        }
+                        println!("{:?}", tmpl);
+                    }
+                }
+            }
+        }
+    }
+}
+
 
 impl MTEquation {
     /// How MTEF is stored in files and objects
@@ -116,7 +203,10 @@ impl MTEquation {
         };
         loop {
             match cur.read_u8() {
-                Ok(END) => eqn.records.push(MTRecords::END),
+                Ok(END) => {
+                    let end = MTEnd { end: true };
+                    eqn.records.push(MTRecords::END(end));
+                }
                 Ok(LINE) => {
                     let options = cur.read_u8().unwrap();
                     let mut line = MTLine {
@@ -136,8 +226,13 @@ impl MTEquation {
                     eqn.records.push(MTRecords::LINE(line))
                 }
                 Ok(CHAR) => {
-                    let mut ch = MTChar { nudge: (0, 0), typeface: 0,
-                        mtcode: None, fp8: None, fp16: None };
+                    let mut ch = MTChar {
+                        nudge: (0, 0),
+                        typeface: 0,
+                        mtcode: None,
+                        fp8: None,
+                        fp16: None,
+                    };
                     let options = cur.read_u8().unwrap();
                     if MTEF_OPT_NUDGE == MTEF_OPT_NUDGE & options {
                         ch.nudge = read_nudge_values(&mut cur)
@@ -170,7 +265,7 @@ impl MTEquation {
                         true => {
                             let byte2 = cur.read_u8().unwrap() as u16;
                             (byte1 & 0x7F) | (byte2 << 8)
-                        },
+                        }
                         false => { byte1 }
                     };
                     tmpl.options = cur.read_u8().unwrap();
@@ -184,7 +279,7 @@ impl MTEquation {
                 Ok(FONT_STYLE_DEF) => {
                     let record = MTRecords::FONT_STYLE_DEF {
                         font_def_index: cur.read_u8().unwrap(),
-                        char_style: cur.read_u8().unwrap()
+                        char_style: cur.read_u8().unwrap(),
                     };
                     eqn.records.push(record)
                 }
@@ -220,7 +315,7 @@ impl MTEquation {
                     for _i in 0..size {
                         let c = cur.read_u8().unwrap();
                         match c == 0 {
-                            true => { styles.push(None) },
+                            true => { styles.push(None) }
                             false => { styles.push(Some(cur.read_u8().unwrap())) }
                         }
                     }
@@ -241,24 +336,28 @@ impl MTEquation {
 
 impl MTEquation {
     pub fn translate(&self) -> Result<String, super::error::Error> {
-        let mut latex = String::new();
+        let mut latex = Latex { latex_str: String::new() };
+        let mut stack: Vec<String> = Vec::new();
+        let mut stack_char: Vec<String> = Vec::new();
 
-        let tx_char = |record: &MTChar, tx: &mut String| {
-            if let Some(mtcode) = record.mtcode {
-                let s = String::from_utf16_lossy(&[mtcode]);
-                tx.push_str(&s);
-            }
-        };
         for record in &self.records {
             match record {
-                MTRecords::CHAR(ch) => tx_char(ch, &mut latex),
+                MTRecords::LINE(ln) => ln.to_latex(&mut stack),
+                MTRecords::TMPL(tmpl) => tmpl.to_latex(&mut stack),
+                MTRecords::CHAR(ch) => ch.to_latex(&mut latex),
+                MTRecords::END(ed) => ed.to_latex(
+                    &mut latex, &mut stack, &mut stack_char,
+                ),
                 _ => {}
             }
         }
-        println!("{:?}", latex);
+
+//        println!("{:?}", latex.latex_str);
+//        println!("{:?}", stack_char_list);
         Ok("hello".to_string())
     }
 }
+
 /// How MTEF is Stored in Files and Objects
 /// http://web.archive.org/web/20010304111449/http://mathtype.com/support/tech/MTEF_storage.htm#OLE%20Objects
 /// OLE Equation Objects
@@ -418,7 +517,7 @@ fn read_dimension_arrays(cur: &mut Cursor<Vec<u8>>, size: u8) -> Result<Vec<Stri
 
     while count < size {
         let ch = cur.read_u8().unwrap();
-        let hi = (ch & 0xF0)/16;
+        let hi = (ch & 0xF0) / 16;
         let lo = ch & 0x0F;
         fx(hi, &mut tmp_str, &new_str).unwrap();
         new_str = false;
@@ -438,7 +537,7 @@ fn read_dimension_arrays(cur: &mut Cursor<Vec<u8>>, size: u8) -> Result<Vec<Stri
 }
 
 
-fn read_nudge_values(cur: &mut Cursor<Vec<u8>>) -> (u16, u16){
+fn read_nudge_values(cur: &mut Cursor<Vec<u8>>) -> (u16, u16) {
     let b1 = cur.read_u8().unwrap();
     let b2 = cur.read_u8().unwrap();
     match b1 == 128 || b2 == 128 {
