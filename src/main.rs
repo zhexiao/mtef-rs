@@ -8,8 +8,8 @@ mod constants;
 
 
 fn main() {
-    let eqn = eqn::MTEquation::from_ole("assets/oleObject2.bin").unwrap();
+    let eqn = eqn::MTEquation::from_ole("assets/oleObject5.bin").unwrap();
 //    println!("{:?}", eqn);
     let latex = eqn.translate();
-    println!("{:?}", latex);
+//    println!("{:?}", latex);
 }

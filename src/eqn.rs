@@ -5,21 +5,27 @@ use std::io::BufRead;
 use encoding::{Encoding, DecoderTrap};
 use encoding::all::{GBK, UTF_8};
 use std::borrow::Cow;
-use crate::constants::{selector, selector_ocupy};
+use crate::constants::{selector, selector_occupy, typeface};
 
 #[derive(Debug)]
 struct Latex {
     // 保存最后生成的latex代码
     latex_str: String,
 
-    // 保存line, tmpl等栈数据
-    stack: Vec<String>,
+    // 保存每一个字符
+    char_list: Vec<String>,
 
-    // 保存每一个字符组成的字符集
-    stack_char: String,
+    // 保存line, tmpl等栈结构数据
+    stack_format: Vec<String>,
 
     // 出栈，把上一个字符集插入数组
     stack_str: Vec<String>,
+
+    // 记录当前typeface的格式
+    typeface_format: Vec<String>,
+
+    // 记录上一个typeface的值
+    typeface_num: u8,
 }
 
 #[derive(Debug)]
@@ -88,7 +94,7 @@ impl MTLine {
     fn to_latex(&self, latex: &mut Latex) {
         if self.null == false {
             // 推入line标识符
-            latex.stack.push("line".to_string());
+            latex.stack_format.push("#line#".to_string());
         }
     }
 }
@@ -101,8 +107,8 @@ impl MTTmpl {
             selector::TM_ROOT => {
                 let root_str = format!(
                     "\\sqrt [ {second} ] {{ {first} }}",
-                    first = selector_ocupy::FIRST,
-                    second = selector_ocupy::SECOND
+                    first = selector_occupy::FIRST,
+                    second = selector_occupy::SECOND
                 );
 
                 // 返回数据
@@ -111,7 +117,7 @@ impl MTTmpl {
             _ => { "".to_string() }
         };
 
-        latex.stack.push(tmpl_str);
+        latex.stack_format.push(tmpl_str);
     }
 }
 
@@ -119,7 +125,40 @@ impl MTChar {
     fn to_latex(&self, latex: &mut Latex) {
         if let Some(mtcode) = self.mtcode {
             let s = String::from_utf16_lossy(&[mtcode]);
-            latex.stack_char.push_str(&s);
+
+            let mut typeface_format = String::new();
+            let mut new_typeface: bool = false;
+
+            // 记录当前的typecode
+            if self.typeface != latex.typeface_num {
+                new_typeface = true;
+                latex.typeface_num = self.typeface;
+            }
+
+            match self.typeface - 128 {
+                typeface::FN_FUNCTION => {
+                    println!("FN_FUNCTION {}", s);
+                }
+                typeface::FN_TEXT => {
+                    typeface_format = "\\rm{ #TF_1 }".to_string();
+                }
+                typeface::FN_VARIABLE => {
+                    println!("FN_VARIABLE {}", s);
+                }
+                typeface::FN_SYMBOL => {
+                    println!("FN_SYMBOL {}", s);
+                }
+                _ => {
+//                    println!(" not implement ... ")
+                }
+            }
+
+            // 如果存在新的字体，存入格式和占位符
+            if new_typeface {
+                latex.typeface_format.push(typeface_format);
+                latex.char_list.push("#typeface_occupy#".to_string());
+            }
+            latex.char_list.push(s);
         }
     }
 }
@@ -127,26 +166,33 @@ impl MTChar {
 impl MTEnd {
     fn to_latex(&self, latex: &mut Latex) {
         if self.end == true {
-            let pre_stack = latex.stack.pop();
-            let occupy = vec![selector_ocupy::FIRST, selector_ocupy::SECOND];
+            let pre_stack = latex.stack_format.pop();
+            let occupy = vec![selector_occupy::FIRST, selector_occupy::SECOND];
 
             match pre_stack {
                 None => {
-                    println!("------ None ------");
-                }
+                    println!("FULL END ====== {:#?}", latex);
+                },
                 Some(mut tmpl) => {
-                    if tmpl == "line".to_string() {
-                        let l_str = latex.stack_char.clone();
-                        // 将组装好的第一个字符串push到str
-                        latex.stack_str.push(l_str);
+                    if tmpl.as_str() == "#line#" {
+                        let mut tmp_char_str = String::new();
 
-                        // 重置latex字符列表，开始新一个line的字符数据
-                        latex.stack_char = "".to_string();
+                        while 0 < latex.char_list.len() {
+                            let tmp_char = latex.char_list.remove(0);
+
+                            if tmp_char.as_str() == "#typeface_occupy#" {
+//                                println!("typeface");
+                            } else {
+                                tmp_char_str.push_str(tmp_char.as_str());
+                            }
+                        }
+                        latex.stack_str.push(tmp_char_str);
                     } else {
                         // 公式开始
                         let mut i = 0;
-                        while i < latex.stack_str.len() {
-                            tmpl = tmpl.replace(occupy[i], &latex.stack_str[i]);
+                        while 0 < latex.stack_str.len() {
+                            let tmp_str = latex.stack_str.remove(0);
+                            tmpl = tmpl.replace(occupy[i], &tmp_str);
                             i += 1;
                         }
 
@@ -154,6 +200,55 @@ impl MTEnd {
                     }
                 }
             }
+
+
+//            let mut typeface_format = String::new();
+//            let mut typeface_str = String::new();
+
+//            match pre_stack {
+//                None => {
+//                    let mut i = 0;
+//                    while i < latex.stack_char_list.len() {
+//                        let val = latex.stack_char_list[i].as_str();
+//
+//                        if val == "#typeface_occupy#" {
+//                            typeface_format = latex.typeface_format.pop().unwrap();
+//                        } else {
+//                            typeface_str.push_str(val);
+//                        }
+//
+//                        i += 1;
+//                    }
+//
+//                    if typeface_str.as_str() != "" {
+//                        let tmp_latex = typeface_format.replace(
+//                            "#TF_1", typeface_str.as_str()
+//                        );
+//                        latex.latex_str.push_str(tmp_latex.as_str());
+//                    }
+//                },
+//
+//                Some(mut tmpl) => {
+//                    if tmpl == "line".to_string() {
+//
+////                        let l_str = latex.stack_char.clone();
+////                        // 将组装好的第一个字符串push到str
+////                        latex.stack_str.push(l_str);
+////
+////                        // 重置latex字符列表，开始新一个line的字符数据
+////                        latex.stack_char = "".to_string();
+//                    } else {
+//                        // 公式开始
+////                        let mut i = 0;
+////                        while i < latex.stack_str.len() {
+////                            tmpl = tmpl.replace(occupy[i], &latex.stack_str[i]);
+////                            i += 1;
+////                        }
+////
+////                        latex.latex_str.push_str(&tmpl);
+//                    }
+//                }
+//            }
         }
     }
 }
@@ -350,12 +445,15 @@ impl MTEquation {
     pub fn translate(&self) -> Result<String, super::error::Error> {
         let mut latex = Latex {
             latex_str: String::new(),
-            stack: Vec::new(),
-            stack_char: String::new(),
+            char_list: Vec::new(),
+            stack_format: Vec::new(),
             stack_str: Vec::new(),
+            typeface_format: Vec::new(),
+            typeface_num: 0,
         };
 
         for record in &self.records {
+//            println!("{:?}", record);
             match record {
                 MTRecords::LINE(ln) => ln.to_latex(&mut latex),
                 MTRecords::TMPL(tmpl) => tmpl.to_latex(&mut latex),
@@ -365,6 +463,7 @@ impl MTEquation {
             }
         }
 
+//        println!("{:#?}", latex);
         Ok(latex.latex_str)
     }
 }

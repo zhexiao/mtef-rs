@@ -190,7 +190,7 @@ pub mod selector {
     pub const TM_ROOT: u8 = 10;
 }
 
-pub mod selector_ocupy {
+pub mod selector_occupy {
     pub const FIRST: &str = "#M_1";
     pub const SECOND: &str = "#M_2";
     pub const THIRD: &str = "#M_3";
