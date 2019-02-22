@@ -9,7 +9,17 @@ use crate::constants::{selector, selector_ocupy};
 
 #[derive(Debug)]
 struct Latex {
-    latex_str: String
+    // 保存最后生成的latex代码
+    latex_str: String,
+
+    // 保存line, tmpl等栈数据
+    stack: Vec<String>,
+
+    // 保存每一个字符组成的字符集
+    stack_char: String,
+
+    // 出栈，把上一个字符集插入数组
+    stack_str: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -75,16 +85,16 @@ struct MTChar {
 }
 
 impl MTLine {
-    fn to_latex(&self, stack: &mut Vec<String>) {
+    fn to_latex(&self, latex: &mut Latex) {
         if self.null == false {
             // 推入line标识符
-            stack.push("line".to_string());
+            latex.stack.push("line".to_string());
         }
     }
 }
 
 impl MTTmpl {
-    fn to_latex(&self, stack: &mut Vec<String>) {
+    fn to_latex(&self, latex: &mut Latex) {
         let tmpl_str = match self.selector {
             selector::TM_ANGLE => { "".to_string() }
             selector::TM_PAREN => { "".to_string() }
@@ -101,7 +111,7 @@ impl MTTmpl {
             _ => { "".to_string() }
         };
 
-        stack.push(tmpl_str);
+        latex.stack.push(tmpl_str);
     }
 }
 
@@ -109,15 +119,15 @@ impl MTChar {
     fn to_latex(&self, latex: &mut Latex) {
         if let Some(mtcode) = self.mtcode {
             let s = String::from_utf16_lossy(&[mtcode]);
-            latex.latex_str.push_str(&s);
+            latex.stack_char.push_str(&s);
         }
     }
 }
 
 impl MTEnd {
-    fn to_latex(&self, latex: &mut Latex, stack: &mut Vec<String>, stack_char: &mut Vec<String>) {
+    fn to_latex(&self, latex: &mut Latex) {
         if self.end == true {
-            let pre_stack = stack.pop();
+            let pre_stack = latex.stack.pop();
             let occupy = vec![selector_ocupy::FIRST, selector_ocupy::SECOND];
 
             match pre_stack {
@@ -126,19 +136,21 @@ impl MTEnd {
                 }
                 Some(mut tmpl) => {
                     if tmpl == "line".to_string() {
-                        let l_str = latex.latex_str.clone();
-                        stack_char.push(l_str);
+                        let l_str = latex.stack_char.clone();
+                        // 将组装好的第一个字符串push到str
+                        latex.stack_str.push(l_str);
 
-                        // 重置latex字符串列表，开始新一个line的字符数据
-                        latex.latex_str = "".to_string();
+                        // 重置latex字符列表，开始新一个line的字符数据
+                        latex.stack_char = "".to_string();
                     } else {
                         // 公式开始
                         let mut i = 0;
-                        while i < stack_char.len() {
-                            tmpl = tmpl.replace(occupy[i], &stack_char[i]);
+                        while i < latex.stack_str.len() {
+                            tmpl = tmpl.replace(occupy[i], &latex.stack_str[i]);
                             i += 1;
                         }
-                        println!("{:?}", tmpl);
+
+                        latex.latex_str.push_str(&tmpl);
                     }
                 }
             }
@@ -336,25 +348,24 @@ impl MTEquation {
 
 impl MTEquation {
     pub fn translate(&self) -> Result<String, super::error::Error> {
-        let mut latex = Latex { latex_str: String::new() };
-        let mut stack: Vec<String> = Vec::new();
-        let mut stack_char: Vec<String> = Vec::new();
+        let mut latex = Latex {
+            latex_str: String::new(),
+            stack: Vec::new(),
+            stack_char: String::new(),
+            stack_str: Vec::new(),
+        };
 
         for record in &self.records {
             match record {
-                MTRecords::LINE(ln) => ln.to_latex(&mut stack),
-                MTRecords::TMPL(tmpl) => tmpl.to_latex(&mut stack),
+                MTRecords::LINE(ln) => ln.to_latex(&mut latex),
+                MTRecords::TMPL(tmpl) => tmpl.to_latex(&mut latex),
                 MTRecords::CHAR(ch) => ch.to_latex(&mut latex),
-                MTRecords::END(ed) => ed.to_latex(
-                    &mut latex, &mut stack, &mut stack_char,
-                ),
+                MTRecords::END(ed) => ed.to_latex(&mut latex),
                 _ => {}
             }
         }
 
-//        println!("{:?}", latex.latex_str);
-//        println!("{:?}", stack_char_list);
-        Ok("hello".to_string())
+        Ok(latex.latex_str)
     }
 }
 
