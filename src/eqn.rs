@@ -131,32 +131,41 @@ impl MTChar {
 
             // 记录当前的typecode
             if self.typeface != latex.typeface_num {
-                new_typeface = true;
+                // 记录一个typeface的结尾
+                if latex.typeface_num != 0 {
+                    latex.char_list.push("#end#".to_string());
+                }
+
+                // 保存上一个typeface数据
                 latex.typeface_num = self.typeface;
+
+                new_typeface = true;
+            } else {
+                new_typeface = false;
             }
 
             match self.typeface - 128 {
                 typeface::FN_FUNCTION => {
-                    println!("FN_FUNCTION {}", s);
+                    // 保持原数据
+//                    typeface_format = " { \\mathit #TF_1 } "
                 }
                 typeface::FN_TEXT => {
-                    typeface_format = "\\rm{ #TF_1 }".to_string();
+                    typeface_format = "{ \\rm{ #TF_1 } }".to_string();
                 }
                 typeface::FN_VARIABLE => {
-                    println!("FN_VARIABLE {}", s);
-                }
-                typeface::FN_SYMBOL => {
-                    println!("FN_SYMBOL {}", s);
+                    // 保持原数据，格式数学和变量
                 }
                 _ => {
-//                    println!(" not implement ... ")
+//                    println!(" not implement ... {0}", self.typeface - 128);
                 }
             }
 
             // 如果存在新的字体，存入格式和占位符
             if new_typeface {
-                latex.typeface_format.push(typeface_format);
+                // 记录一个typeface的开始
                 latex.char_list.push("#typeface_occupy#".to_string());
+
+                latex.typeface_format.push(typeface_format);
             }
             latex.char_list.push(s);
         }
@@ -171,22 +180,56 @@ impl MTEnd {
 
             match pre_stack {
                 None => {
+                    if latex.stack_str.len() > 0 {
+                        let stack_str = latex.stack_str.remove(0);
+                        if stack_str.as_str() == "" {} else {
+                            latex.latex_str.push_str(stack_str.as_str());
+                        }
+                    }
                     println!("FULL END ====== {:#?}", latex);
-                },
+                }
                 Some(mut tmpl) => {
                     if tmpl.as_str() == "#line#" {
+                        //补齐字符位的#end#
+                        latex.char_list.push("#end#".to_string());
+
                         let mut tmp_char_str = String::new();
+                        let mut typeface_fmt = String::from("");
+
+                        let mut tmp_stack_str = String::new();
+
 
                         while 0 < latex.char_list.len() {
                             let tmp_char = latex.char_list.remove(0);
 
                             if tmp_char.as_str() == "#typeface_occupy#" {
-//                                println!("typeface");
+                                // typeface开始
+                                typeface_fmt = latex.typeface_format.remove(0);
+                            } else if tmp_char.as_str() == "#end#" {
+                                // typeface结束
+                                if typeface_fmt.as_str() != "" {
+                                    tmp_char_str = typeface_fmt.replace(
+                                        "#TF_1",
+                                        tmp_char_str.as_str(),
+                                    );
+
+                                    // 置空
+                                    typeface_fmt = "".to_string();
+                                }
+
+                                // 保存latex字符
+                                tmp_stack_str.push_str(tmp_char_str.as_str());
+
+                                // 置空
+                                tmp_char_str = "".to_string();
                             } else {
                                 tmp_char_str.push_str(tmp_char.as_str());
                             }
                         }
-                        latex.stack_str.push(tmp_char_str);
+
+
+                        // 保存stack_str字符
+                        latex.stack_str.push(tmp_stack_str);
                     } else {
                         // 公式开始
                         let mut i = 0;
