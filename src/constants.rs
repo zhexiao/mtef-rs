@@ -188,6 +188,8 @@ pub mod selector {
     pub const TM_ANGLE: u8 = 0;
     pub const TM_PAREN: u8 = 1;
     pub const TM_ROOT: u8 = 10;
+    pub const TM_FRACT: u8 = 11;
+    pub const TM_SUP: u8 = 28;
 }
 
 pub mod selector_occupy {
